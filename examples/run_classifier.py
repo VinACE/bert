@@ -25,6 +25,9 @@ import logging
 import argparse
 import random
 from tqdm import tqdm, trange
+import pandas as pd
+import pdb
+import math
 
 import numpy as np
 import torch
@@ -47,7 +50,6 @@ class InputExample(object):
 
     def __init__(self, guid, text_a, text_b=None, label=None):
         """Constructs a InputExample.
-
         Args:
             guid: Unique id for the example.
             text_a: string. The untokenized text of the first sequence. For single
@@ -91,12 +93,18 @@ class DataProcessor(object):
     @classmethod
     def _read_tsv(cls, input_file, quotechar=None):
         """Reads a tab separated value file."""
-        with open(input_file, "r", encoding='utf-8') as f:
-            reader = csv.reader(f, delimiter="\t", quotechar=quotechar)
-            lines = []
-            for line in reader:
-                lines.append(line)
-            return lines
+        reader=pd.read_csv(input_file,sep='\t', encoding='utf-8')
+        lines = []
+        for line in reader.values:
+            lines.append(line)
+        return lines
+
+#         with open(input_file, "r", encoding='utf-8') as f:
+#             reader = csv.reader(f, delimiter="\t", quotechar=quotechar)
+#             lines = []
+#             for line in reader:
+#                 lines.append(line)
+#             return lines
 
 
 class MrpcProcessor(DataProcessor):
@@ -121,12 +129,12 @@ class MrpcProcessor(DataProcessor):
         """Creates examples for the training and dev sets."""
         examples = []
         for (i, line) in enumerate(lines):
-            if i == 0:
-                continue
+#             if i == 0:
+#                 continue
             guid = "%s-%s" % (set_type, i)
-            text_a = line[3]
-            text_b = line[4]
-            label = line[0]
+            text_a = line[0]
+            text_b = line[2]
+            label = line[4]
             examples.append(
                 InputExample(guid=guid, text_a=text_a, text_b=text_b, label=label))
         return examples
@@ -201,7 +209,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
 
     features = []
     for (ex_index, example) in enumerate(examples):
-        tokens_a = tokenizer.tokenize(example.text_a)
+        tokens_a = tokenizer.tokenize(str(example.text_a))
 
         tokens_b = None
         if example.text_b:
@@ -256,7 +264,7 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
         assert len(input_mask) == max_seq_length
         assert len(segment_ids) == max_seq_length
 
-        label_id = label_map[example.label]
+        label_id = label_map[str(example.label)]
         if ex_index < 5:
             logger.info("*** Example ***")
             logger.info("guid: %s" % (example.guid))
@@ -275,6 +283,8 @@ def convert_examples_to_features(examples, label_list, max_seq_length, tokenizer
                               label_id=label_id))
     return features
 
+def sigmoid(x):
+    return 1 / (1 + math.exp(-x))
 
 def _truncate_seq_pair(tokens_a, tokens_b, max_length):
     """Truncates a sequence pair in place to the maximum length."""
@@ -444,7 +454,9 @@ def main():
     num_labels = num_labels_task[task_name]
     label_list = processor.get_labels()
 
-    tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
+#     tokenizer = BertTokenizer.from_pretrained(args.bert_model, do_lower_case=args.do_lower_case)
+    token_config = args.bert_model[:args.bert_model.index(".")] + "-vocab.txt"
+    tokenizer = BertTokenizer.from_pretrained(token_config, do_lower_case=args.do_lower_case)
 
     train_examples = None
     num_train_steps = None
@@ -580,6 +592,7 @@ def main():
         model.eval()
         eval_loss, eval_accuracy = 0, 0
         nb_eval_steps, nb_eval_examples = 0, 0
+        logits_all=np.empty(shape=[8,2])
         for input_ids, input_mask, segment_ids, label_ids in eval_dataloader:
             input_ids = input_ids.to(device)
             input_mask = input_mask.to(device)
@@ -589,7 +602,8 @@ def main():
             with torch.no_grad():
                 tmp_eval_loss = model(input_ids, segment_ids, input_mask, label_ids)
                 logits = model(input_ids, segment_ids, input_mask)
-
+            
+#             pdb.set_trace()
             logits = logits.detach().cpu().numpy()
             label_ids = label_ids.to('cpu').numpy()
             tmp_eval_accuracy = accuracy(logits, label_ids)
@@ -599,7 +613,13 @@ def main():
 
             nb_eval_examples += input_ids.size(0)
             nb_eval_steps += 1
+#             pdb.set_trace()
+            logits_all=np.append(logits_all,logits,axis=0)
+        d=pd.DataFrame(logits_all,columns=['prob1','prob2'])[8:]
+        d['prob']=d['prob1'].apply(lambda x: round(sigmoid(x),4)*100)
+        d.to_csv('./output/score.csv')
 
+            
         eval_loss = eval_loss / nb_eval_steps
         eval_accuracy = eval_accuracy / nb_eval_examples
 
