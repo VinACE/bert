@@ -442,7 +442,7 @@ The data for SQuAD can be downloaded with the following links and should be save
 
 ```shell
 export SQUAD_DIR=/path/to/SQUAD
-
+export SQUAD_DIR=/demo-mount/bert/SQuAD
 python run_squad.py \
   --bert_model bert-base-uncased \
   --do_train \
